@@ -31,12 +31,20 @@ bash .claude/skills/codex-plan-loop/uninstall.sh
 
 ```
 /codex-plan-loop <task description>
+/codex-plan-loop --plan-only <task description>
 ```
 
-Example:
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--plan-only` | Stop after the plan is approved. Skips execution and code review phases. Useful for getting a reviewed plan without making code changes. |
+
+### Examples
 
 ```
 /codex-plan-loop Add user role management with permission checks
+/codex-plan-loop --plan-only Refactor the auth module to use JWT
 ```
 
 ## Workflow
@@ -50,7 +58,10 @@ Example:
      ▼                                        │
 [Codex: Review Plan] ◄───────────────────┐    │
      │                                   │    │
-     ├─ approved ──► [PHASE 3: Execute]  │    │
+     ├─ approved ──┬─► [--plan-only?]    │    │
+     │             │    YES → [Plan-Only  │    │
+     │             │           Report]    │    │
+     │             │    NO  → [PHASE 3]──►│───►│
      │                                   │    │
      └─ needs_changes ──► [Claude: Write │    │
           Resolution + Next Plan] ───────┘    │

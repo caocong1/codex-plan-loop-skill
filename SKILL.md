@@ -1,6 +1,6 @@
 ---
 name: codex-plan-loop
-description: "Claude plans -> Codex reviews -> Claude revises -> execute -> Codex code review. Iterative plan+code review loop with structured JSON artifacts."
+description: "Claude plans -> Codex reviews -> Claude revises -> execute -> Codex code review. Iterative plan+code review loop with structured JSON artifacts. Use --plan-only to stop after plan approval without executing."
 disable-model-invocation: true
 effort: high
 allowed-tools:
@@ -19,6 +19,16 @@ allowed-tools:
 You are executing the **codex-plan-loop** workflow. This is a structured, artifact-driven workflow where Claude plans, Codex reviews, and iteration continues until quality gates are met.
 
 **User request:** $ARGUMENTS
+
+---
+
+## Flags
+
+Parse `$ARGUMENTS` for the following flags before extracting the user request:
+
+- `--plan-only`: Stop after the plan is approved (skip execution and code review phases). Remove this flag from the user request text before saving to `request.md`.
+
+Example: `/codex-plan-loop --plan-only refactor the auth module` → flag `plan-only` is set, user request is `refactor the auth module`.
 
 ---
 
@@ -100,9 +110,41 @@ For `round = 1` to `MAX_PLAN_ROUNDS`:
 
 ---
 
+## PHASE 2.5: Plan-Only Exit
+
+If the `--plan-only` flag is set and the plan is approved:
+
+1. **Announce**: Tell the user the final approved plan version.
+2. **Write `$WORKDIR/final-report.md`**:
+   ```markdown
+   # Final Report (Plan Only)
+
+   ## Task
+   <original user request>
+
+   ## Plan
+   - Final plan version: vN
+   - Plan review rounds: N
+   - Unresolved plan issues: <list or "none">
+
+   ## Approved Plan
+   <full content of the final approved plan>
+
+   ## Next Steps
+   To execute this plan, run the skill again without --plan-only, or manually follow the steps in the approved plan.
+   ```
+3. **Print a summary to the user** including:
+   - Working directory path
+   - How many plan rounds occurred
+   - Final plan version
+   - Any minor issues noted but not blocking
+4. **Stop. Do NOT proceed to Phase 3, 4, or 5.**
+
+---
+
 ## PHASE 3: Execution
 
-Once the plan is approved:
+Once the plan is approved (and `--plan-only` is NOT set):
 
 1. **Announce**: Tell the user which plan version is final and that execution is starting.
 

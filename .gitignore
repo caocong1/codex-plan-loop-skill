@@ -1,2 +1,5 @@
 .omc/
 node_modules/
+
+# Codex plan loop working directories
+.codex-plan-loop/
