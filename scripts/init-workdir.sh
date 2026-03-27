@@ -23,4 +23,29 @@ if cd "$PROJECT_ROOT" && git rev-parse HEAD > /dev/null 2>&1; then
   echo "Baseline commit saved: $(cat "$WORKDIR/.git-baseline")" >&2
 fi
 
+# Detect project type
+detect_project_type() {
+  if [ -f "$PROJECT_ROOT/package.json" ]; then
+    echo "nodejs"
+  elif [ -f "$PROJECT_ROOT/Cargo.toml" ]; then
+    echo "rust"
+  elif [ -f "$PROJECT_ROOT/go.mod" ]; then
+    echo "go"
+  elif [ -f "$PROJECT_ROOT/pom.xml" ] || [ -f "$PROJECT_ROOT/build.gradle" ] || [ -f "$PROJECT_ROOT/build.gradle.kts" ]; then
+    echo "java"
+  elif [ -f "$PROJECT_ROOT/pyproject.toml" ] || [ -f "$PROJECT_ROOT/setup.py" ] || [ -f "$PROJECT_ROOT/requirements.txt" ]; then
+    echo "python"
+  elif [ -f "$PROJECT_ROOT/pubspec.yaml" ]; then
+    echo "dart"
+  elif [ -f "$PROJECT_ROOT/mix.exs" ]; then
+    echo "elixir"
+  else
+    echo "unknown"
+  fi
+}
+
+PROJECT_TYPE=$(detect_project_type)
+echo "$PROJECT_TYPE" > "$WORKDIR/project-type.txt"
+echo "Project type detected: $PROJECT_TYPE" >&2
+
 echo "$WORKDIR"

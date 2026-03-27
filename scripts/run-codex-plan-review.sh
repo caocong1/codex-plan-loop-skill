@@ -14,10 +14,10 @@
 
 set -euo pipefail
 
-CODEX_BIN="${CODEX_BIN:-codex}"
 WORKDIR="${1:?Usage: run-codex-plan-review.sh <workdir> <plan_version>}"
 VERSION="${2:?Usage: run-codex-plan-review.sh <workdir> <plan_version>}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
 TEMPLATE_DIR="${SCRIPT_DIR}/../templates"
 
 PLAN_FILE="${WORKDIR}/plan.v${VERSION}.md"
@@ -26,6 +26,10 @@ OUTPUT_FILE="${WORKDIR}/review.plan.v${VERSION}.json"
 RAW_FILE="${WORKDIR}/review.plan.v${VERSION}.raw.txt"
 THREAD_FILE="${WORKDIR}/codex-plan-thread.id"
 CODEX_OUTPUT="${WORKDIR}/.codex-plan-output.txt"
+
+# Source shared helpers
+# shellcheck source=scripts/lib/codex-helpers.sh
+source "${LIB_DIR}/codex-helpers.sh"
 
 # Validate inputs
 if [ ! -f "$PLAN_FILE" ]; then
@@ -37,99 +41,24 @@ if [ ! -f "$REQUEST_FILE" ]; then
   exit 1
 fi
 
-# --- Helper: extract thread_id from JSONL output (M1 fix: use sys.argv) ---
-extract_thread_id() {
-  python3 - "$1" <<'PY' 2>/dev/null
-import json, sys
-for line in open(sys.argv[1]):
-    line = line.strip()
-    if not line: continue
-    try:
-        obj = json.loads(line)
-        tid = obj.get('thread_id') or obj.get('session_id')
-        if tid:
-            print(tid)
-            sys.exit(0)
-    except Exception: pass
-sys.exit(1)
-PY
-}
-
-# --- Helper: extract and validate JSON from codex output ---
-extract_json() {
-  local raw="$1"
-
-  # Try: raw output is already valid JSON
-  if echo "$raw" | python3 -m json.tool > /dev/null 2>&1; then
-    echo "$raw"
-    return 0
-  fi
-
-  # Try: extract first JSON object
-  local json_output
-  json_output=$(echo "$raw" | sed -n '/^[[:space:]]*{/,/^[[:space:]]*}/p')
-  if [ -n "$json_output" ] && echo "$json_output" | python3 -m json.tool > /dev/null 2>&1; then
-    echo "$json_output"
-    return 0
-  fi
-
-  # Try: strip markdown code fences
-  json_output=$(echo "$raw" | sed -n '/```json/,/```/p' | sed '1d;$d')
-  if [ -n "$json_output" ] && echo "$json_output" | python3 -m json.tool > /dev/null 2>&1; then
-    echo "$json_output"
-    return 0
-  fi
-
-  return 1
-}
-
-# --- Helper: run codex with read-only sandbox (B1 fix) ---
-run_codex_exec() {
-  local prompt="$1"
-  local jsonl_tmp="${WORKDIR}/.codex-jsonl-$$.tmp"
-
-  echo "$prompt" | "$CODEX_BIN" exec --sandbox read-only --json -o "$CODEX_OUTPUT" - > "$jsonl_tmp" 2>/dev/null
-  local exit_code=$?
-
-  local tid
-  tid=$(extract_thread_id "$jsonl_tmp") && echo "$tid" > "$THREAD_FILE"
-
-  rm -f "$jsonl_tmp"
-  return $exit_code
-}
-
-# --- Helper: resume codex thread ---
-run_codex_resume() {
-  local thread_id="$1"
-  local prompt="$2"
-  local jsonl_tmp="${WORKDIR}/.codex-jsonl-$$.tmp"
-
-  echo "$prompt" | "$CODEX_BIN" exec resume --sandbox read-only --json -o "$CODEX_OUTPUT" "$thread_id" - > "$jsonl_tmp" 2>/dev/null
-  local exit_code=$?
-
-  rm -f "$jsonl_tmp"
-  return $exit_code
-}
-
 # --- Build prompt based on round ---
 PREV_VERSION=$((VERSION - 1))
+REQUEST=$(cat "$REQUEST_FILE")
+PLAN=$(cat "$PLAN_FILE")
 
 if [ "$VERSION" -eq 1 ]; then
   # ===== ROUND 1: Full prompt =====
   TEMPLATE=$(cat "${TEMPLATE_DIR}/codex-plan-review-prompt.md")
-  REQUEST=$(cat "$REQUEST_FILE")
-  PLAN=$(cat "$PLAN_FILE")
 
-  PROMPT="${TEMPLATE}"
-  PROMPT="${PROMPT//\{\{REQUEST\}\}/$REQUEST}"
-  PROMPT="${PROMPT//\{\{PLAN\}\}/$PLAN}"
-  PROMPT="${PROMPT//\{\{PREVIOUS_REVIEW_CONTEXT\}\}/}"
+  PROMPT=$(safe_template_replace "$TEMPLATE" \
+    "REQUEST=$REQUEST" \
+    "PLAN=$PLAN" \
+    "PREVIOUS_REVIEW_CONTEXT=")
 
   echo "Running Codex plan review Round 1 (new session)..." >&2
 
 else
   # ===== ROUND 2+: Try resume, fallback to full prompt =====
-  PLAN=$(cat "$PLAN_FILE")
   RESOLUTION=""
   if [ -f "${WORKDIR}/resolution.v${PREV_VERSION}.md" ]; then
     RESOLUTION=$(cat "${WORKDIR}/resolution.v${PREV_VERSION}.md")
@@ -167,7 +96,6 @@ Please review this updated plan. Verify that previously raised blocking/major is
 
   # Fallback: full stateless prompt
   TEMPLATE=$(cat "${TEMPLATE_DIR}/codex-plan-review-prompt.md")
-  REQUEST=$(cat "$REQUEST_FILE")
 
   PREVIOUS_REVIEW_CONTEXT=""
   PREV_REVIEW_FILE="${WORKDIR}/review.plan.v${PREV_VERSION}.json"
@@ -192,10 +120,10 @@ ${PREV_REVIEW_CONTENT}
 ${RESOLUTION}"
   fi
 
-  PROMPT="${TEMPLATE}"
-  PROMPT="${PROMPT//\{\{REQUEST\}\}/$REQUEST}"
-  PROMPT="${PROMPT//\{\{PLAN\}\}/$PLAN}"
-  PROMPT="${PROMPT//\{\{PREVIOUS_REVIEW_CONTEXT\}\}/$PREVIOUS_REVIEW_CONTEXT}"
+  PROMPT=$(safe_template_replace "$TEMPLATE" \
+    "REQUEST=$REQUEST" \
+    "PLAN=$PLAN" \
+    "PREVIOUS_REVIEW_CONTEXT=$PREVIOUS_REVIEW_CONTEXT")
 
   echo "Running Codex plan review Round ${VERSION} (stateless fallback)..." >&2
 fi

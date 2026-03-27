@@ -14,11 +14,11 @@
 
 set -euo pipefail
 
-CODEX_BIN="${CODEX_BIN:-codex}"
 WORKDIR="${1:?Usage: run-codex-code-review.sh <workdir> <review_version> <project_root>}"
 VERSION="${2:?Usage: run-codex-code-review.sh <workdir> <review_version> <project_root>}"
 PROJECT_ROOT="${3:?Usage: run-codex-code-review.sh <workdir> <review_version> <project_root>}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
 TEMPLATE_DIR="${SCRIPT_DIR}/../templates"
 
 OUTPUT_FILE="${WORKDIR}/review.code.v${VERSION}.json"
@@ -27,6 +27,12 @@ CHANGE_SUMMARY="${WORKDIR}/change-summary.md"
 THREAD_FILE="${WORKDIR}/codex-code-thread.id"
 CODEX_OUTPUT="${WORKDIR}/.codex-code-output.txt"
 BASELINE_FILE="${WORKDIR}/.git-baseline"
+
+CODEX_DIFF_MAX_LINES="${CODEX_DIFF_MAX_LINES:-8000}"
+
+# Source shared helpers
+# shellcheck source=scripts/lib/codex-helpers.sh
+source "${LIB_DIR}/codex-helpers.sh"
 
 # Find the latest plan version
 LATEST_PLAN=""
@@ -41,62 +47,6 @@ if [ -z "$LATEST_PLAN" ]; then
   echo "ERROR: No plan file found in $WORKDIR" >&2
   exit 1
 fi
-
-# --- Helpers ---
-extract_thread_id() {
-  python3 - "$1" <<'PY' 2>/dev/null
-import json, sys
-for line in open(sys.argv[1]):
-    line = line.strip()
-    if not line: continue
-    try:
-        obj = json.loads(line)
-        tid = obj.get('thread_id') or obj.get('session_id')
-        if tid:
-            print(tid)
-            sys.exit(0)
-    except Exception: pass
-sys.exit(1)
-PY
-}
-
-extract_json() {
-  local raw="$1"
-  if echo "$raw" | python3 -m json.tool > /dev/null 2>&1; then
-    echo "$raw"; return 0
-  fi
-  local json_output
-  json_output=$(echo "$raw" | sed -n '/^[[:space:]]*{/,/^[[:space:]]*}/p')
-  if [ -n "$json_output" ] && echo "$json_output" | python3 -m json.tool > /dev/null 2>&1; then
-    echo "$json_output"; return 0
-  fi
-  json_output=$(echo "$raw" | sed -n '/```json/,/```/p' | sed '1d;$d')
-  if [ -n "$json_output" ] && echo "$json_output" | python3 -m json.tool > /dev/null 2>&1; then
-    echo "$json_output"; return 0
-  fi
-  return 1
-}
-
-run_codex_exec() {
-  local prompt="$1"
-  local jsonl_tmp="${WORKDIR}/.codex-jsonl-$$.tmp"
-  echo "$prompt" | "$CODEX_BIN" exec --sandbox read-only --json -o "$CODEX_OUTPUT" - > "$jsonl_tmp" 2>/dev/null
-  local exit_code=$?
-  local tid
-  tid=$(extract_thread_id "$jsonl_tmp") && echo "$tid" > "$THREAD_FILE"
-  rm -f "$jsonl_tmp"
-  return $exit_code
-}
-
-run_codex_resume() {
-  local thread_id="$1"
-  local prompt="$2"
-  local jsonl_tmp="${WORKDIR}/.codex-jsonl-$$.tmp"
-  echo "$prompt" | "$CODEX_BIN" exec resume --sandbox read-only --json -o "$CODEX_OUTPUT" "$thread_id" - > "$jsonl_tmp" 2>/dev/null
-  local exit_code=$?
-  rm -f "$jsonl_tmp"
-  return $exit_code
-}
 
 # --- Gather diff context (B2 fix: scoped to baseline) ---
 gather_diff_context() {
@@ -132,8 +82,8 @@ ${untracked}"
 
   local diff_lines
   diff_lines=$(echo "$full_diff" | wc -l)
-  if [ "$diff_lines" -gt 8000 ]; then
-    diff=$(echo "$full_diff" | head -n 8000)
+  if [ "$diff_lines" -gt "$CODEX_DIFF_MAX_LINES" ]; then
+    diff=$(echo "$full_diff" | head -n "$CODEX_DIFF_MAX_LINES")
     diff="${diff}
 
 ... (truncated, ${diff_lines} total lines — see full diff via git diff)"
@@ -158,19 +108,41 @@ gather_diff_context
 # --- Build prompt based on round ---
 if [ "$VERSION" -eq 1 ]; then
   TEMPLATE=$(cat "${TEMPLATE_DIR}/codex-code-review-prompt.md")
-  PROMPT="${TEMPLATE}"
-  PROMPT="${PROMPT//\{\{PLAN\}\}/$GATHERED_PLAN}"
-  PROMPT="${PROMPT//\{\{CHANGE_SUMMARY\}\}/$GATHERED_SUMMARY}"
-  PROMPT="${PROMPT//\{\{DIFF_STAT\}\}/$GATHERED_DIFF_STAT}"
-  PROMPT="${PROMPT//\{\{DIFF\}\}/$GATHERED_DIFF}"
-  PROMPT="${PROMPT//\{\{TEST_RESULTS\}\}/$GATHERED_TEST_RESULTS}"
+
+  PROMPT=$(safe_template_replace "$TEMPLATE" \
+    "PLAN=$GATHERED_PLAN" \
+    "CHANGE_SUMMARY=$GATHERED_SUMMARY" \
+    "DIFF_STAT=$GATHERED_DIFF_STAT" \
+    "DIFF=$GATHERED_DIFF" \
+    "TEST_RESULTS=$GATHERED_TEST_RESULTS" \
+    "PREVIOUS_REVIEW_CONTEXT=")
 
   echo "Running Codex code review Round 1 (new session)..." >&2
 
 else
+  PREV_VERSION=$((VERSION - 1))
+
+  # Build previous review context
+  PREV_REVIEW_CONTEXT=""
+  PREV_REVIEW_FILE="${WORKDIR}/review.code.v${PREV_VERSION}.json"
+  if [ -f "$PREV_REVIEW_FILE" ]; then
+    PREV_REVIEW_CONTENT=$(cat "$PREV_REVIEW_FILE")
+    PREV_REVIEW_CONTEXT="### Previous Review (Round ${PREV_VERSION})
+
+This is a follow-up round. Your previous review raised the issues below. Verify whether blocking/major issues have been addressed. Do not re-raise resolved issues.
+
+\`\`\`json
+${PREV_REVIEW_CONTENT}
+\`\`\`"
+  fi
+
+  # Check if we have a thread to resume
   if [ -f "$THREAD_FILE" ]; then
     THREAD_ID=$(cat "$THREAD_FILE")
     RESUME_PROMPT="The code has been updated based on your previous review. Please review the changes again.
+
+## Previous Review Summary (Round ${PREV_VERSION})
+${PREV_REVIEW_CONTEXT}
 
 ## Updated Change Summary
 
@@ -205,13 +177,16 @@ Please review the updated code. Verify that previously raised blocking/major iss
     echo "Resume failed, falling back to stateless full prompt..." >&2
   fi
 
+  # Fallback: full stateless prompt with previous review context
   TEMPLATE=$(cat "${TEMPLATE_DIR}/codex-code-review-prompt.md")
-  PROMPT="${TEMPLATE}"
-  PROMPT="${PROMPT//\{\{PLAN\}\}/$GATHERED_PLAN}"
-  PROMPT="${PROMPT//\{\{CHANGE_SUMMARY\}\}/$GATHERED_SUMMARY}"
-  PROMPT="${PROMPT//\{\{DIFF_STAT\}\}/$GATHERED_DIFF_STAT}"
-  PROMPT="${PROMPT//\{\{DIFF\}\}/$GATHERED_DIFF}"
-  PROMPT="${PROMPT//\{\{TEST_RESULTS\}\}/$GATHERED_TEST_RESULTS}"
+
+  PROMPT=$(safe_template_replace "$TEMPLATE" \
+    "PLAN=$GATHERED_PLAN" \
+    "CHANGE_SUMMARY=$GATHERED_SUMMARY" \
+    "DIFF_STAT=$GATHERED_DIFF_STAT" \
+    "DIFF=$GATHERED_DIFF" \
+    "TEST_RESULTS=$GATHERED_TEST_RESULTS" \
+    "PREVIOUS_REVIEW_CONTEXT=$PREV_REVIEW_CONTEXT")
 
   echo "Running Codex code review Round ${VERSION} (stateless fallback)..." >&2
 fi

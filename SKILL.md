@@ -27,8 +27,20 @@ You are executing the **codex-plan-loop** workflow. This is a structured, artifa
 Parse `$ARGUMENTS` for the following flags before extracting the user request:
 
 - `--plan-only`: Stop after the plan is approved (skip execution and code review phases). Remove this flag from the user request text before saving to `request.md`.
+- `--resume <path>`: Resume from an existing workdir. Detect the last completed phase from artifact files and continue from the next phase. When using this flag, skip PHASE 1 initialization and load state from the specified workdir.
 
 Example: `/codex-plan-loop --plan-only refactor the auth module` → flag `plan-only` is set, user request is `refactor the auth module`.
+
+**Resume detection logic:**
+1. If `final-report.md` exists → workflow already completed, report to user and stop.
+2. If `review.code.v*.json` exists → PHASE 4 (code review) was last. Detect latest round, continue from next code review round.
+3. If `change-summary.md` exists → PHASE 3 (execution) was last. Run code review (PHASE 4).
+4. If `execution-log.md` exists → PHASE 3 was interrupted. Resume from where it left off.
+5. If `plan.v*.md` and `review.plan.v*.json` exist → PHASE 2 completed. Run execution (PHASE 3).
+6. If only `plan.v*.md` exists → Plan was generated but not reviewed. Start plan review.
+7. Otherwise → No artifacts found, start from PHASE 1.
+
+Example: `/codex-plan-loop --resume /path/to/project/.codex-plan-loop/20260327-1200-my-task`
 
 ---
 
@@ -160,15 +172,23 @@ Once the plan is approved (and `--plan-only` is NOT set):
      - Files changed: <list>
      ```
 
-3. **Capture test results**: If tests were run, save output to `$WORKDIR/test-results.txt`.
+3. **Track acceptance checklist**: Read the final approved plan's `review.plan.v*.json` to find the `acceptance_checklist` field. Write each item as a checkbox in the execution log:
+   ```
+   ## Acceptance Checklist
+   - [ ] <checklist item 1>
+   - [ ] <checklist item 2>
+   ```
+   As you execute, mark each item `[x]` when verified. If an item cannot be met, note the reason.
 
-4. **Generate change summary**: Write `$WORKDIR/change-summary.md` containing:
+4. **Capture test results**: If tests were run, save output to `$WORKDIR/test-results.txt`.
+
+5. **Generate change summary**: Write `$WORKDIR/change-summary.md` containing:
    - List of all modified files with brief description of each change
    - Why each change was made (trace back to plan)
    - Tests that were run and their results
    - Remaining risks or known issues
 
-5. **Generate diff summary**:
+6. **Generate diff summary**:
    ```bash
    bash "${SCRIPTS_DIR}/summarize-diff.sh" "$PROJECT_ROOT" "$WORKDIR"
    ```

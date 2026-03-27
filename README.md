@@ -32,6 +32,7 @@ bash .claude/skills/codex-plan-loop/uninstall.sh
 ```
 /codex-plan-loop <task description>
 /codex-plan-loop --plan-only <task description>
+/codex-plan-loop --resume <workdir-path>
 ```
 
 ### Flags
@@ -39,12 +40,14 @@ bash .claude/skills/codex-plan-loop/uninstall.sh
 | Flag | Description |
 |------|-------------|
 | `--plan-only` | Stop after the plan is approved. Skips execution and code review phases. Useful for getting a reviewed plan without making code changes. |
+| `--resume <path>` | Resume from an existing workdir. Detects the last completed phase from artifact files and continues from the next phase. |
 
 ### Examples
 
 ```
 /codex-plan-loop Add user role management with permission checks
 /codex-plan-loop --plan-only Refactor the auth module to use JWT
+/codex-plan-loop --resume .codex-plan-loop/20260327-1200-my-task
 ```
 
 ## Workflow
@@ -117,6 +120,9 @@ Environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CODEX_BIN` | `codex` | Path to codex binary (use for npx or custom installs) |
+| `CODEX_TIMEOUT` | `300` | Timeout in seconds for Codex exec calls |
+| `CODEX_DIFF_MAX_LINES` | `8000` | Max lines of diff sent to Codex for code review |
+| `CODEX_MODEL` | *(default)* | Optional Codex model override |
 | `REPO_URL` | *(GitHub URL)* | Override git clone URL in install.sh |
 
 ## Directory Structure
@@ -127,7 +133,9 @@ Environment variables:
 ├── README.md                             # This file
 ├── uninstall.sh                          # Uninstaller
 ├── scripts/
-│   ├── init-workdir.sh                   # Create timestamped work directory + save baseline
+│   ├── lib/
+│   │   └── codex-helpers.sh              # Shared helper functions (JSON extraction, codex exec, safe template)
+│   ├── init-workdir.sh                   # Create timestamped work directory + save baseline + detect project type
 │   ├── run-codex-plan-review.sh          # Run Codex plan review (read-only sandbox)
 │   ├── run-codex-code-review.sh          # Run Codex code review (read-only sandbox)
 │   └── summarize-diff.sh                 # Generate scoped diff summary
@@ -147,7 +155,8 @@ Each run creates a directory at `.codex-plan-loop/<timestamp>-<slug>/`:
 | `plan.v1.md` ... `plan.v5.md` | Plan versions |
 | `review.plan.v1.json` ... | Codex plan review output (structured JSON) |
 | `resolution.v1.md` ... | Claude's response to each review |
-| `execution-log.md` | Step-by-step execution log |
+| `execution-log.md` | Step-by-step execution log with acceptance checklist |
+| `project-type.txt` | Detected project type (nodejs/rust/go/java/python/unknown) |
 | `change-summary.md` | Summary of all changes made |
 | `test-results.txt` | Test output (if tests were run) |
 | `diff-stat.txt` | Git diff statistics (scoped to baseline) |
@@ -162,6 +171,7 @@ Each run creates a directory at `.codex-plan-loop/<timestamp>-<slug>/`:
 2. Check raw output in `*.raw.txt` files in the work directory
 3. Codex may need authentication — run `codex` interactively first to set up
 4. If using npx: `CODEX_BIN="npx codex" /codex-plan-loop ...`
+5. Set a longer timeout if Codex is slow: `CODEX_TIMEOUT=600 /codex-plan-loop ...`
 
 ### Invalid JSON from Codex
 
@@ -171,11 +181,13 @@ The scripts automatically retry once. If both attempts fail:
 
 ### Large diffs
 
-If `git diff` exceeds 8000 lines, the code review script truncates it and includes diff stats instead. For very large changes, consider breaking work into smaller tasks.
+If `git diff` exceeds `CODEX_DIFF_MAX_LINES` (default 8000), the code review script truncates it and includes diff stats instead. Override with `CODEX_DIFF_MAX_LINES=16000`.
+
+### Thread ID loss in multi-round reviews
+
+If Codex session is interrupted and resume fails, the script falls back to stateless mode automatically. A warning is printed when thread_id cannot be extracted. Resume may not work for subsequent rounds.
 
 ## Limitations
 
-- Codex uses its default model configuration; no model override in the skill
 - Plan and code review rounds are capped at 5 each
-- Bash `${//}` substitution in prompt templates may have edge cases with very large artifacts containing special characters
 - Tested with codex-cli 0.116.0; minimum supported version is 0.79.0
