@@ -31,13 +31,35 @@ echo "Installing codex-plan-loop skill..."
 echo "  Source: $SCRIPT_DIR"
 echo "  Target: $TARGET_DIR"
 
+# Check codex version
+CODEX_BIN="${CODEX_BIN:-codex}"
+if command -v "$CODEX_BIN" > /dev/null 2>&1; then
+  CODEX_VERSION=$("$CODEX_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  if [ -n "$CODEX_VERSION" ]; then
+    # Compare versions: OK if CODEX_VERSION >= 0.79.0
+    if [ "$(printf '%s\n' "0.79.0" "$CODEX_VERSION" | sort -V | head -n1)" != "0.79.0" ]; then
+      echo "WARNING: codex version $CODEX_VERSION < 0.79.0. Skill may not work correctly." >&2
+    else
+      echo "Codex version: $CODEX_VERSION (OK)"
+    fi
+  else
+    echo "WARNING: Could not determine codex version. Make sure codex >= 0.79.0 is installed." >&2
+  fi
+else
+  echo "WARNING: codex not found in PATH. Install it with: brew install codex" >&2
+fi
+
 # Create target directory
-mkdir -p "$TARGET_DIR/scripts" "$TARGET_DIR/templates"
+mkdir -p "$TARGET_DIR/scripts/lib" "$TARGET_DIR/templates"
 
 # Copy files
 cp "$SCRIPT_DIR/SKILL.md" "$TARGET_DIR/"
 cp "$SCRIPT_DIR/README.md" "$TARGET_DIR/"
 cp "$SCRIPT_DIR"/scripts/*.sh "$TARGET_DIR/scripts/"
+if [ -d "$SCRIPT_DIR/scripts/lib" ]; then
+  cp "$SCRIPT_DIR"/scripts/lib/*.sh "$TARGET_DIR/scripts/lib/"
+  chmod +x "$TARGET_DIR/scripts/lib/"*.sh
+fi
 cp "$SCRIPT_DIR"/templates/*.md "$TARGET_DIR/templates/"
 cp "$SCRIPT_DIR/uninstall.sh" "$TARGET_DIR/" 2>/dev/null || true
 
@@ -65,10 +87,12 @@ echo ""
 echo "Usage:"
 echo "  /codex-plan-loop <task description>"
 echo "  /codex-plan-loop --plan-only <task description>  (plan only, no execution)"
+echo "  /codex-plan-loop --resume <workdir>             (resume from existing run)"
 echo ""
-echo "Prerequisites:"
-echo "  - codex CLI >= 0.79.0 (brew install codex)"
-echo "  - python3 (for JSON validation)"
+echo "Environment variables:"
+echo "  CODEX_TIMEOUT=$CODEX_TIMEOUT         # seconds"
+echo "  CODEX_DIFF_MAX_LINES=8000             # max diff lines for code review"
+echo "  CODEX_MODEL=<model>                   # optional model override"
 echo ""
 echo "To uninstall:"
 echo "  bash $TARGET_DIR/uninstall.sh $PROJECT_ROOT"

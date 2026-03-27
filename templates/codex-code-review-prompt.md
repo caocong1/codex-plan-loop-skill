@@ -41,6 +41,8 @@ You are a strict but pragmatic code reviewer. Your job is to review actual code 
 
 {{TEST_RESULTS}}
 
+{{PREVIOUS_REVIEW_CONTEXT}}
+
 ## Output Format
 
 You MUST output valid JSON and nothing else. No markdown fences, no commentary outside the JSON.
