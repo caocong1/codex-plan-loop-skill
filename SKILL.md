@@ -46,8 +46,8 @@ Example: `/codex-plan-loop --resume /path/to/project/.codex-plan-loop/20260327-1
 
 ## Constants
 
-- `MAX_PLAN_ROUNDS = 5`
-- `MAX_CODE_REVIEW_ROUNDS = 5`
+- `MAX_PLAN_ROUNDS = 10`
+- `MAX_CODE_REVIEW_ROUNDS = 10`
 - `PROJECT_ROOT` = the current working directory
 - `SKILL_DIR` = `.claude/skills/codex-plan-loop`
 - `SCRIPTS_DIR` = `.claude/skills/codex-plan-loop/scripts`

@@ -68,7 +68,7 @@ bash .claude/skills/codex-plan-loop/uninstall.sh
      │                                   │    │
      └─ needs_changes ──► [Claude: Write │    │
           Resolution + Next Plan] ───────┘    │
-          (max 5 rounds)                      │
+          (max 10 rounds)                     │
                                               │
 [Claude: Execute Plan] ◄─────────────────────┘
      │
@@ -82,7 +82,7 @@ bash .claude/skills/codex-plan-loop/uninstall.sh
      │                                   │
      └─ needs_changes ──► [Claude: Fix   │
           + Re-test] ────────────────────┘
-          (max 5 rounds)
+          (max 10 rounds)
 ```
 
 ## Prerequisites
@@ -189,7 +189,7 @@ If Codex session is interrupted and resume fails, the script falls back to state
 
 ## Limitations
 
-- Plan and code review rounds are capped at 5 each
+- Plan and code review rounds are capped at 10 each
 - Tested with codex-cli 0.116.0; minimum supported version is 0.79.0
 
 ## Changelog
@@ -198,6 +198,7 @@ If Codex session is interrupted and resume fails, the script falls back to state
 
 - **fix**: replace `echo "$prompt" |` with temp-file + `cat` pipe in all codex exec/resume functions to prevent prompt corruption with large or special-character-heavy content (backticks, braces, CJK, etc.)
 - **fix**: redirect codex stderr to `.codex-stderr.log` instead of `/dev/null` for debuggability; stderr is printed on failure
+- **change**: increase default max rounds from 5 to 10 for both plan review and code review loops
 
 ### v1.0.0
 
