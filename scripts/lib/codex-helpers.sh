@@ -135,14 +135,26 @@ run_codex_exec() {
   local prompt="$1"
   local sandbox_mode="${2:-read-only}"
   local jsonl_tmp="${WORKDIR}/.codex-jsonl-$$.tmp"
+  local prompt_tmp="${WORKDIR}/.codex-prompt-$$.tmp"
+  local stderr_log="${WORKDIR}/.codex-stderr.log"
   local output_file="${3:-${CODEX_OUTPUT:-${WORKDIR}/.codex-output.txt}}"
 
   local args
   args=$(_codex_args "$sandbox_mode")
 
+  # Write prompt to temp file to avoid shell pipe issues with large/special-char content
+  printf '%s' "$prompt" > "$prompt_tmp"
+
   # shellcheck disable=SC2086
-  echo "$prompt" | "$CODEX_BIN" exec ${args} -o "$output_file" - > "$jsonl_tmp" 2>/dev/null
+  cat "$prompt_tmp" | "$CODEX_BIN" exec ${args} -o "$output_file" - > "$jsonl_tmp" 2>"$stderr_log"
   local exit_code=$?
+
+  rm -f "$prompt_tmp"
+
+  if [ $exit_code -ne 0 ] && [ -s "$stderr_log" ]; then
+    echo "CODEX STDERR:" >&2
+    cat "$stderr_log" >&2
+  fi
 
   # Try to extract and save thread_id
   if ! tid=$(extract_thread_id "$jsonl_tmp"); then
@@ -161,14 +173,26 @@ run_codex_resume() {
   local prompt="$2"
   local sandbox_mode="${3:-read-only}"
   local jsonl_tmp="${WORKDIR}/.codex-jsonl-$$.tmp"
+  local prompt_tmp="${WORKDIR}/.codex-prompt-$$.tmp"
+  local stderr_log="${WORKDIR}/.codex-stderr.log"
   local output_file="${4:-${CODEX_OUTPUT:-${WORKDIR}/.codex-output.txt}}"
 
   local args
   args=$(_codex_args "$sandbox_mode")
 
+  # Write prompt to temp file to avoid shell pipe issues with large/special-char content
+  printf '%s' "$prompt" > "$prompt_tmp"
+
   # shellcheck disable=SC2086
-  echo "$prompt" | "$CODEX_BIN" exec resume ${args} "$thread_id" - > "$jsonl_tmp" 2>/dev/null
+  cat "$prompt_tmp" | "$CODEX_BIN" exec resume ${args} "$thread_id" - > "$jsonl_tmp" 2>"$stderr_log"
   local exit_code=$?
+
+  rm -f "$prompt_tmp"
+
+  if [ $exit_code -ne 0 ] && [ -s "$stderr_log" ]; then
+    echo "CODEX STDERR:" >&2
+    cat "$stderr_log" >&2
+  fi
 
   # Update thread_id (it may change on resume)
   if tid=$(extract_thread_id "$jsonl_tmp"); then

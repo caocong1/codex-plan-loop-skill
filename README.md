@@ -191,3 +191,15 @@ If Codex session is interrupted and resume fails, the script falls back to state
 
 - Plan and code review rounds are capped at 5 each
 - Tested with codex-cli 0.116.0; minimum supported version is 0.79.0
+
+## Changelog
+
+### v1.1.0 (2026-03-31)
+
+- **fix**: replace `echo "$prompt" |` with temp-file + `cat` pipe in all codex exec/resume functions to prevent prompt corruption with large or special-character-heavy content (backticks, braces, CJK, etc.)
+- **fix**: redirect codex stderr to `.codex-stderr.log` instead of `/dev/null` for debuggability; stderr is printed on failure
+
+### v1.0.0
+
+- Initial release: structured plan review and code review loops powered by Codex CLI
+- `--plan-only` flag, `--resume` flag, shared helpers extraction
